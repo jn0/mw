@@ -1,0 +1,96 @@
+#!/bin/bash
+
+hist=~/.mw/history
+svg=~/.mw/graph.svg
+
+read_json() { jq .dt,.main.pressure/1.33322387415 <$hist; } # time & kPa_to_mmHg
+draw_pict() { graph -I a -T svg -X Time -Y Pressure --page-size=a4,xsize=21cm,ysize=297mm >$svg; }
+
+# read_json | draw_pict && eog $svg
+
+START_DATE=
+
+read_hist() {
+    if [ -n "$START_DATE" ]; then
+        jq -cM "select(.dt > $START_DATE)" $hist
+    else
+        cat $hist
+    fi
+}
+
+prs=/var/tmp/pressure.$$
+tmp=/var/tmp/temperature.$$
+wnd=/var/tmp/windspeed.$$
+hum=/var/tmp/humidity.$$
+
+trap "rm -f $prs $tmp $wnd $hum" EXIT
+
+show_p=yes
+show_t=yes
+show_w=yes
+show_h=yes
+
+while [ $# != 0 ]; do
+    if [[ "$1" =~ ^-[ptwh]+$ ]]; then
+        chr="$1"
+        shift
+        while [ -n "$chr" ]; do
+            case "${chr:0:1}" in
+            p) show_p=no;;
+            t) show_t=no;;
+            w) show_w=no;;
+            h) show_h=no;;
+            esac
+            chr=${chr:1}
+        done
+        unset chr
+        continue
+    fi
+    case "$1" in
+    -p|--pressure)      show_p=no; shift;;
+    -t|--temperature)   show_t=no; shift;;
+    -w|--windspeed)     show_w=no; shift;;
+    -h|--humidity)      show_h=no; shift;;
+    '-?'|--help)
+        echo "$0 [-p|--pressure] [-t|--temperature] [-w|--windspeed] [-h|--humidity]" \
+             "[-?--help] [date/time specification]"
+        echo "-[ptwh] -- don't display that topic"
+        echo "<date/time specification> -- start time; see date(1) for format;"
+        echo "                             the leading 'since' word is ignored"
+        echo "Example: $(basename $0) -h -w since last mon"
+        exit 0;;
+    *)  break;;
+    esac
+done
+if [ -n "$1" ]; then
+    START_DATE="$*"; START_DATE=${START_DATE,,}
+    case "${START_DATE}" in since*) START_DATE=${START_DATE#*since};; esac
+    START_DATE=$(date --date="$START_DATE" '+%s')
+    [ -n "$START_DATE" ] || exit 1
+fi
+
+read_hist | jq .dt,.main.pressure/1.33322387415 >$prs
+read_hist | jq .dt,.main.temp >$tmp
+read_hist | jq .dt,.main.humidity >$hum
+read_hist | jq .dt,.wind.speed >$wnd
+
+dt=$(read_hist | head -n1 | jq '.dt|strftime("%F %R UTC")' | tr -d '"')
+rn=$(read_hist | wc -l)
+
+NEW_GRAPH='--reposition 0.0 0.0 1.0 --blankout 0.0 -E y'
+
+graph --input-format a \
+    --output-format svg \
+    --page-size=a4,ysize=21cm,xsize=297mm \
+    --x-label Time --toggle-no-ticks x \
+    --font-size 0.03 \
+    --top-label "Since $dt ($rn)" --title-font-size 0.04 \
+    --toggle-use-color $(
+        [ $show_p = no ] || echo $NEW_GRAPH -m1 -Y red:Pressure_mmHg $prs
+        [ $show_t = no ] || echo $NEW_GRAPH -m2 -Y green:Temperature_°C $tmp
+        [ $show_w = no ] || echo $NEW_GRAPH -m3 -Y blue:Windspeed_m/s $wnd
+        [ $show_h = no ] || echo $NEW_GRAPH -m4 -Y magenta:Humidity_% $hum
+    ) > $svg &&
+coproc eog -w -g --name='Weather Report' -f $svg
+
+# EOF #

@@ -1,0 +1,45 @@
+#!/bin/bash
+
+tput=$(type -P tput)
+[ -x "$tput" ] || tput=/bin/false
+_COLORS=$($tput colors 2>/dev/null || echo 0)
+
+_tput() { [ $_COLORS -lt 16 ] || tput "$@"; } 2>/dev/null
+
+init=$(_tput init)
+
+norm=$(_tput sgr0)
+
+bold1=$(_tput smso)
+bold0=$(_tput rmso)
+
+# Color             Value   RGB
+fg_black=$(_tput setaf  0)      # 0,0,0
+fg_red=$(_tput setaf    1)      # max,0,0
+fg_green=$(_tput setaf  2)      # 0,max,0
+fg_yellow=$(_tput setaf 3)      # max,max,0
+fg_blue=$(_tput setaf   4)      # 0,0,max
+fg_magenta=$(_tput setaf 5)     # max,0,max
+fg_cyan=$(_tput setaf   6)      # 0,max,max
+fg_white=$(_tput setaf  7)      # max,max,max
+
+bg_black=$(_tput setab  0)      # 0,0,0
+bg_red=$(_tput setab    1)      # max,0,0
+bg_green=$(_tput setab  2)      # 0,max,0
+bg_yellow=$(_tput setab 3)      # max,max,0
+bg_blue=$(_tput setab   4)      # 0,0,max
+bg_magenta=$(_tput setab 5)     # max,0,max
+bg_cyan=$(_tput setab   6)      # 0,max,max
+bg_white=$(_tput setab  7)      # max,max,max
+
+if [ "$1" = test ]; then
+    echo "_COLORS=$_COLORS"
+    for ((i=0; i<=7; i++)); do
+        echo "FG[$i] head$(_tput setaf $i)TEST${norm}tail"
+    done
+    for ((i=0; i<=7; i++)); do
+        echo "BG[$i] head$(_tput setab $i)TEST${norm}tail"
+    done
+fi
+
+# EOF #

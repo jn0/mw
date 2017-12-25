@@ -1,0 +1,378 @@
+#!/bin/bash
+
+EXE=$(readlink -f "$0")
+
+APIKEY= # for curl-interactive
+source $(dirname "$EXE")/config.sh
+
+TIMEOUT=600
+wCACHE=/var/tmp/weather-${APIKEY}.mw
+fCACHE=/var/tmp/forecast-${APIKEY}.mw
+HISTORY="$HOME/.mw/history"
+ERRORS="$HOME/.mw/errors"
+
+source $(dirname $(readlink -f "$0"))/xcolor
+echo -n "${bold0}${white}"
+
+fg_norm=${fg_white}
+fg_val=${fg_cyan}
+fg_ign=${fg_black}
+fg_pls=${fg_red}
+fg_mns=${fg_blue}
+fg_danger=${fg_red}
+
+# { "id": 524901, "name": "Moscow", "country": "RU", "coord": { "lon": 37.615555, "lat": 55.75222 } }
+
+CITYID=524901
+LANGCODE=ru
+
+wURL="http://api.openweathermap.org/data/2.5/weather?"
+wURL+="id=$CITYID&lang=$LANGCODE&units=metric&APPID=$APIKEY"
+
+fURL="http://api.openweathermap.org/data/2.5/forecast?"
+fURL+="id=$CITYID&lang=$LANGCODE&units=metric&APPID=$APIKEY"
+
+get_mtime() {
+    [ -e "$@" ] || { echo 999999999; return; }
+    ls -otnNr --time-style='+%s' --color=never --indicator-style=none "$@" |
+    tr -s '[ \t]' '\t' |
+    cut -f5
+}
+
+_parse() { jq -cM "$@" | tr -s '[:space:]' ' '; } 2>/dev/null
+w_get() { echo `_parse "$@" < "$wCACHE"`; }
+f_get() { echo `_parse "$@" < "$fCACHE"`; }
+
+get() { w_get "$@"; }
+
+now=$(date '+%s')
+
+HOST=${wURL#*:} # //a.b.com/path/q?...
+while [ -n "$HOST" -a ${HOST:0:1} = / ]; do HOST=${HOST:1}; done
+HOST=${HOST%%/*}
+trap 'echo "# Provided by $HOST: $(wc -l <$HISTORY) records for $(dhm $OBSERVED)"' EXIT
+
+fetch() {
+    local rc=0
+    curl -Ssk "$wURL" > "$wCACHE"
+    curl -Ssk "$fURL" > "$fCACHE"
+    jq -cM . < "$wCACHE" >/dev/null 2>&1 || {
+        rc=$?
+        echo "# Bad data received!" >&2
+        echo "RC=$rc : $(< $wCACHE)" >> $ERRORS
+        : > $wCACHE
+        exit 1
+    }
+    rc=$(get .cod)
+    [ "$rc" = 200 ] || {
+        echo "Shit happens: $rc" >&2
+        echo "HTTP=$rc : $(< $wCACHE)" >> $ERRORS
+        : > $wCACHE
+        exit 2
+    }
+    [ -e $wCACHE ] && echo $(tr -s '\n' ' ' < $wCACHE) >> $HISTORY || :
+}
+
+[ -d "$(dirname "$ERRORS")" ] || {
+    [ -z "$(dirname "$ERRORS")" ] || mkdir -p "$(dirname "$ERRORS")"
+    touch "$ERRORS"
+}
+[ -d "$(dirname "$HISTORY")" ] || {
+    [ -z "$(dirname "$HISTORY")" ] || mkdir -p "$(dirname "$HISTORY")"
+    touch "$HISTORY"
+}
+
+if [ -e $wCACHE ] && (( ($now - $(get_mtime $wCACHE)) < $TIMEOUT )); then
+    echo "# Updated $(($now - $(get_mtime $wCACHE))) seconds ago - ${fg_ign}using cache${fg_norm}…"
+else
+    echo "# Updated $(($now - $(get_mtime $wCACHE))) seconds ago - ${bold1}refetching${bold0}…"
+    fetch
+fi >&2
+
+# {
+#   "coord": { "lon": 37.62, "lat": 55.75 },
+#   "weather": [
+#     {
+#       "id": 600,
+#       "main": "Snow",
+#       "description": "небольшой снегопад",
+#       "icon": "13d"
+#     }
+#   ],
+#   "base": "stations",
+#   "main": {
+#     "temp": -3.75,
+#     "pressure": 1007,
+#     "humidity": 85,
+#     "temp_min": -4,
+#     "temp_max": -3
+#   },
+#   "visibility": 10000,
+#   "wind": { "speed": 4, "deg": 310 },
+#   "clouds": { "all": 90 },
+#   "dt": 1512648000,
+#   "sys": {
+#     "type": 1,
+#     "id": 7323,
+#     "message": 0.0023,
+#     "country": "RU",
+#     "sunrise": 1512625478,
+#     "sunset": 1512651456
+#   },
+#   "id": 524901,
+#   "name": "Moscow",
+#   "cod": 200
+# }
+
+first() {
+    [ -e "$HISTORY" ] &&
+        echo `head -qn1 "$HISTORY" | _parse "$@"` ||
+        echo none
+} 2>/dev/null
+last() {
+    [ -e "$HISTORY" ] && # the last line is "this", not "last"
+        echo `tail -qn2 "$HISTORY" | head -n1 | _parse "$@"` ||
+        echo none
+} 2>/dev/null
+
+delta() {
+    local prefix="$1" ; shift
+    local suffix="$1" ; shift
+    local x=$(get "$@")
+    local y=$(last "$@")
+    local o=''
+    if [ "$y" = none ]; then
+        : o="${fg_ign}⍉${fg_norm}"
+    elif [ "$x" = "$y" ]; then
+        : o="${fg_ign}⍙0${fg_norm}"
+    else
+        # local d=$(echo -e "scale=0\n(($x - $y) + 0.5) / 1" | bc -q)
+        local d=$(echo "$x - $y" | bc -q)
+        local c=${fg_mns}
+        [ "${d:0:1}" = - ] || { d="+$d"; c=${fg_pls}; }
+        o="${c}⍙${d}${fg_norm}"
+    fi
+    [ -z "$o" ] || echo "${prefix}${o}${suffix}"
+}
+
+_dhms() {
+    local w=0 d=0 h=0 m=0 s="$1"
+    local -a o=()
+
+    (( s >= 60 )) && { let m=s/60; let s=s%60; }
+    (( m >= 60 )) && { let h=m/60; let m=m%60; }
+    (( h >= 24 )) && { let d=h/24; let h=h%24; }
+    (( d >=  7 )) && { let w=d/7 ; let d=d%7 ; }
+    echo "$w $d $h $m $s"
+}
+
+dhms() {
+    local label='wdhms'
+    local -a o=()
+
+    local -a data=()
+    read -a data < <(_dhms "$@")
+
+    local -i i=0
+    for ((i=0; i<${#data[@]}; i++)); do
+        local v=${data[$i]} l=${label:$i:1}
+        (( v <= 0 )) || o[${#o[@]}]="${v}${l}"
+    done
+    echo "${o[*]}"
+}
+
+dhm() {
+    local label='wdhms'
+    local -a o=()
+
+    local -a data=()
+    read -a data < <(_dhms "$@")
+    (( ${data[$(( ${#data[@]} - 1 ))]} >= 30 )) && let data[$((${#data[@]}-2))]+=1
+
+    local -i i=0
+    for ((i=0; i<${#data[@]}-1; i++)); do
+        local v=${data[$i]} l=${label:$i:1}
+        (( v <= 0 )) || o[${#o[@]}]="${v}${l}"
+    done
+    echo "${o[*]}"
+}
+
+OBSERVED=$(( $(get .dt) - $(first .dt) ))
+
+visibility=$(get .visibility)
+[ $visibility = 10000 ] && visibility='∞'
+
+kPa_to_mmHg() {
+    local kPa="$1" # / 1.33322387415 hPa/mmHg
+    echo -e "scale=0\n(${kPa} / 1.33322387415) / 1" | bc -q
+}
+
+#    0    22   45    67   90  112   135  157  180  202   225  247  270  292   315  337  360
+WD=('N' 'NNE' 'NE' 'ENE' 'E' 'ESE' 'SE' 'SSE' 'S' 'SSW' 'SW' 'WSW' 'W' 'WNW' 'NW' 'NNW' 'N')
+WA=('⬇' '⬇⬋'  '⬋'  '⬋⬅'  '⬅' '⬅⬉'  '⬉'  '⬉⬆'  '⬆' '⬆⬈'  '⬈'  '⬈➡'  '➡' '➡⬊'  '⬊'  '⬊⬇'  '⬇')
+wx=$(echo -e "scale=0\n( $(get .wind.deg) * 1000. ) / 22500" | bc -q)
+wx="${WD[$wx]} ${WA[$wx]}"
+
+#    0    1      2       3        4        5       6        7        8       9
+#    0   1..10 20..30  40..40   50..50   60..60  70..80   90..99    100    obscured
+CS=('○🌣' '◍🌣'   '◔🌤'    '◔🌥'     '◑🌥'     '◑☁'    '◕☁'     '◉☁'     '●☁'    '◌◌') # clouds
+cp=$(get .clouds.all) # %%
+if (( cp == 0 )); then ci=0
+elif ((cp <= 10)); then ci=1
+elif ((cp <= 35)); then ci=2
+elif ((cp <= 45)); then ci=3
+elif ((cp <= 55)); then ci=4
+elif ((cp <= 65)); then ci=5
+elif ((cp <= 85)); then ci=6
+elif ((cp <= 99)); then ci=7
+elif ((cp <= 100)); then ci=8
+else ci=9
+fi
+cs=${CS[$ci]}
+cs="${cs:0:1} ${cs:1}"
+
+declare -A WEATHER=(
+    [snow]='❄'
+    [mist]='🌫'
+    [fog]='🌁'
+    [rain]='🌧'
+    [clouds]='🌥'
+    [drizzle]="$(echo -e $'\U1F3CA')" # 🏊
+    [sun]="$(echo -e $'\u2600')" # ☀
+)
+
+get_weather() {
+    get '.weather[]|.main+" ("+.description+")"' | sed -e 's/" "/\n/g' | tr -d '"'
+}
+
+get_fc_weather() {
+    get ".list[$@]"'.weather[]|.main+" ("+.description+")"' | sed -e 's/" "/\n/g' | tr -d '"'
+}
+
+weather() {
+    local w x W c
+    local -i i=0
+    while read w x; do
+        W=${w,,}
+        W=${WEATHER[$W]}
+        [ -z "$W" ] && { W='? '; x="$x $w"; } || W=" $W"
+        # (( i == 0 )) && c='' || c=', '
+        # echo "$c$W $x"
+        echo "$W $x"
+        let i+=1
+    done < <(get_weather)
+}
+
+fc_weather() {
+    local w x W c
+    local -i i=0
+    while read w x; do
+        W=${w,,}
+        W=${WEATHER[$W]}
+        [ -z "$W" ] && { W='? '; x="$x $w"; } || W=" $W"
+        # (( i == 0 )) && c='' || c=', '
+        # echo "$c$W $x"
+        echo "$W $x"
+        let i+=1
+    done < <(get_weather "$@")
+}
+
+wind_speed() {
+    local -i v=$(echo -e "scale=0\n(($(get .wind.speed) * 10.0) + 0.5) / 1" | bc -q)
+    local r=''
+    { (( v <= 2 )) && r='0:Штиль'; } ||
+    { (( v <= 15 )) && r='1:Тихий'; } ||
+    { (( v <= 33 )) && r='2:Лёгкий'; } ||
+    { (( v <= 54 )) && r='3:Слабый'; } ||
+    { (( v <= 79 )) && r='4:Умеренный'; } ||
+    { (( v <= 107 )) && r='5:Свежий'; } ||
+    { (( v <= 138 )) && r='6:Сильный'; } ||
+    { (( v <= 171 )) && r='7:Крепкий'; } ||
+    { (( v <= 207 )) && r='8:Очень крепкий'; } ||
+    { (( v <= 244 )) && r='9:Шторм'; } ||
+    { (( v <= 284 )) && r='10:Сильный шторм'; } ||
+    { (( v <= 326 )) && r='11:Жестокий шторм'; } ||
+    { (( v <= 1180 )) && r='12:Ураган'; } ||
+    r='99:Пиздец'
+    (( $(echo $r|cut -d: -f1) > 6 )) && r="${fg_danger}${r}"
+    echo "${r}"
+}
+
+s2d() { local f="$1"; shift; date --date="@$*" "+$f"; }
+seconds2date() { s2d '+%F %T %z' "$@"; }
+
+wind_mps=$(get .wind.speed)
+wind_kmh=$(echo -e "scale=0\n(($wind_mps * 3.600) + 0.500) / 1" | bc -q) # m/s to km/h
+
+SUNRISE=$(get .sys.sunrise)
+SUNSET=$(get .sys.sunset)
+if (( now > SUNRISE && now < SUNSET )); then
+    sl=$(( SUNSET - now ))
+    sl="day $(echo -e $'\u2600') $(dhm $sl)"
+else
+    sl="night $(echo -e $'\u263D') …"
+fi
+
+################################################################################
+echo     "        Now: $(LC_TIME=ru_RU.UTF-8 date '+%F %T %A') ($sl)"
+echo -n  "  Processed: ${fg_val}$(seconds2date "$(get .dt)")${fg_norm}"
+    echo -n ", ${fg_val}$(get .name)${fg_norm}"
+    echo " (N$(get .coord.lat) E$(get .coord.lon))"
+
+echo     "    Sunrise: $(seconds2date $SUNRISE)"
+echo     "     Sunset: $(seconds2date $SUNSET)"
+echo     "   Sunlight: ${fg_val}$(dhms $(( $SUNSET - $SUNRISE )))${fg_norm}"
+
+echo -n  "Temperature: ${fg_val}$(get .main.temp)°C${fg_norm}"
+    echo -n " ($(get .main.temp_min)…$(get .main.temp_max))"
+    echo "$(delta ', ' '°C' .main.temp)"
+
+echo -n  "   Humidity: ${fg_val}$(get .main.humidity)%${fg_norm}"
+    echo "$(delta ', ' '%' .main.humidity)"
+
+echo -n  "   Pressure: $(get .main.pressure) hPa"
+    echo -n " or ${fg_val}$(kPa_to_mmHg $(get .main.pressure)) mmHg${fg_norm}"
+    echo "$(delta ', ' ' hPa' .main.pressure)"
+
+echo -n  "       Wind: $(get .wind.speed) m/s"
+    echo -n " or ${fg_val}${wind_kmh} km/h ($(wind_speed))${fg_norm}"
+    echo -n " [${fg_val}$wx ${fg_norm}]"
+    echo -n " @ $(get .wind.deg)°"
+    echo "$(delta ', ' '°' .wind.deg)$(delta ', ' ' m/s' .wind.speed)"
+
+echo     " Visibility: ${fg_val}$visibility${fg_norm}"
+echo     "     Clouds: $(get .clouds.all)% ${fg_val}$cs ${fg_norm}"
+[ -n "$(get .snow.3h)" ] && echo "       Snow: $(get .snow.3h) in 3 hrs"
+[ -n "$(get .rain.3h)" ] && echo "       Rain: $(get .rain.3h) in 3 hrs"
+
+# echo     "    Weather: ${bold1}$(weather | tr -d '\n')${bold0}"
+echo -n  "    Weather: "
+    typeset -i i=0
+    while read w; do
+        (( i == 0 )) || echo -n '             '
+        echo "${bold1}${w}${bold0}"
+        let i+=1
+    done < <(weather)
+################################################################################
+f_cnt=$(f_get .cnt)
+
+cat <<fEOT
+   Forecast: $f_cnt records
+             Temperatu Pressure
+ Date  Time  °C     ⍙  mmHg  ⍙  Weather
+------ ----- ----- --- ---- --- ----------------------------------------
+fEOT
+
+(( f_cnt <= 3 )) || f_cnt=3
+
+for ((i=0; i<f_cnt; i++)); do
+    echo -n "$(LC_ALL=C s2d '%b %d %R' "$(f_get ".list[$i].dt")")"
+    LC_ALL=C printf '%+6.1f %+3.0f %4.0f %+3.0f' \
+        $(f_get ".list[$i].main.temp") \
+        $(f_get ".list[$i].main.temp - $(get .main.temp)") \
+        $(kPa_to_mmHg $(f_get ".list[$i].main.grnd_level")) \
+        $(kPa_to_mmHg $(f_get ".list[$i].main.grnd_level - $(get .main.pressure)"))
+    echo '' $(fc_weather $i) # $(f_get ".list[$i].dt_txt")
+done
+################################################################################
+# EOF #
