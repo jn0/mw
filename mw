@@ -246,6 +246,7 @@ declare -A WEATHER=(
     [clouds]='🌥'
     [drizzle]="$(echo -e $'\U1F3CA')" # 🏊
     [sun]="$(echo -e $'\u2600')" # ☀
+    [clear]="$(echo -e $'\u25cb')" # ○
 )
 
 get_weather() {
