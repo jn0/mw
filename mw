@@ -216,7 +216,7 @@ kPa_to_mmHg() {
 
 #    0    22   45    67   90  112   135  157  180  202   225  247  270  292   315  337  360
 WD=('N' 'NNE' 'NE' 'ENE' 'E' 'ESE' 'SE' 'SSE' 'S' 'SSW' 'SW' 'WSW' 'W' 'WNW' 'NW' 'NNW' 'N')
-WA=('⬇' '⬇⬋'  '⬋'  '⬋⬅'  '⬅' '⬅⬉'  '⬉'  '⬉⬆'  '⬆' '⬆⬈'  '⬈'  '⬈➡'  '➡' '➡⬊'  '⬊'  '⬊⬇'  '⬇')
+WA=('⬇' '⬋⬇'  '⬋'  '⬋⬅'  '⬅' '⬅⬉'  '⬉'  '⬉⬆'  '⬆' '⬆⬈'  '⬈'  '⬈➡'  '➡' '➡⬊'  '⬊'  '⬇⬊'  '⬇')
 wx=$(echo -e "scale=0\n( $(get .wind.deg) * 1000. ) / 22500" | bc -q)
 wx="${WD[$wx]} ${WA[$wx]}"
 
@@ -243,10 +243,13 @@ declare -A WEATHER=(
     [mist]='🌫'
     [fog]='🌁'
     [rain]='🌧'
-    [clouds]='🌥'
+    [clouds]="$(echo -e $'\u26c5')" # ⛅
     [drizzle]="$(echo -e $'\U1F3CA')" # 🏊
     [sun]="$(echo -e $'\u2600')" # ☀
     [clear]="$(echo -e $'\u25cb')" # ○
+# u2602 = ☂
+# u2614 = ☔
+# thunder u26c8 = ⛈
 )
 
 get_weather() {
@@ -353,7 +356,7 @@ echo     "    Sunrise: $(seconds2date $SUNRISE)"
 echo     "     Sunset: $(seconds2date $SUNSET)"
 echo     "   Sunlight: ${fg_val}$(dhms $(( $SUNSET - $SUNRISE )))${fg_norm}"
 
-echo -n  "Temperature: ${fg_val}$(get .main.temp)°C${fg_norm}"
+echo -n  "Temperature: 🌡 ${fg_val}$(get .main.temp)°C${fg_norm}"
     echo -n " ($(get .main.temp_min)…$(get .main.temp_max))"
     echo "$(delta ', ' '°C' .main.temp)"
 
@@ -389,7 +392,7 @@ f_cnt=$(f_get .cnt)
 cat <<fEOT
    Forecast: $f_cnt records
              Temperatu Pressure
- Date  Time  °C     ⍙  mmHg  ⍙  Weather
+ Date  Time  🌡 °C   ⍙  mmHg  ⍙  Weather
 ------ ----- ----- --- ---- --- ----------------------------------------
 fEOT
 
