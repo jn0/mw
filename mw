@@ -147,6 +147,7 @@ delta() {
     local suffix="$1" ; shift
     local x=$(get "$@")
     local y=$(last "$@")
+    [ -n "$x" ] || x="$y"
     local o=''
     if [ "$y" = none ]; then
         : o="${fg_ign}⍉${fg_norm}"
