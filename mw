@@ -206,8 +206,9 @@ dhm() {
 
 OBSERVED=$(( $(get .dt) - $(first .dt) ))
 
-visibility=$(get .visibility)
-[ $visibility = 10000 ] && visibility='∞'
+visibility=$(get .visibility) # can be omitted!
+[ -n "$visibility" ] || visibility='×'
+[ "$visibility" = 10000 ] && visibility='∞'
 
 kPa_to_mmHg() {
     local kPa="$1" # / 1.33322387415 hPa/mmHg
