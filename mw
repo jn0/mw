@@ -21,6 +21,10 @@ fg_pls=${fg_red}
 fg_mns=${fg_blue}
 fg_danger=${fg_red}
 
+# Use `curl -Ss http://ip-api.com/json/?fields=city,timezone` to get something
+# like `{ "city": "Moscow", "timezone": "Europe/Moscow" }` JSON to find *current*
+# city *name*
+
 # { "id": 524901, "name": "Moscow", "country": "RU", "coord": { "lon": 37.615555, "lat": 55.75222 } }
 
 CITYID=524901
