@@ -8,9 +8,9 @@ temp=$(mktemp --tmpdir=/var/tmp --suffix=.watch)
 trap 'rm -f "$temp"' EXIT
 
 fetch() {
-    local url=${1:-wttr.in}
+    local url=${1:-ru.wttr.in}
     shift
-    curl -o "$temp" -H "Accept-Language: ru" -Ss "${url}" "$@"
+    curl -o "$temp" -Ss "${url}" "$@"
     cat "$temp"
 }
 
