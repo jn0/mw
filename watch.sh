@@ -1,6 +1,8 @@
 #!/bin/bash
 
-: ${INTERVAL:=60}
+: ${INTERVAL:=300}
+
+(( INTERVAL < 10 )) && INTERVAL=10
 
 temp=$(mktemp --tmpdir=/var/tmp --suffix=.watch)
 trap 'rm -f "$temp"' EXIT
@@ -33,7 +35,7 @@ command=${1:-fetch} ; shift
 while clear; do
     date '+%F %T %z'
     "$command" "$@" | filter
-    sleep 0.5
+    sleep 5
     adjust
 done
 
