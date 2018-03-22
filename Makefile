@@ -6,7 +6,7 @@ endif
 
 all:	help
 
-install:	mw mwstat xcolor config.sh
+install:	mw mwstat xcolor config.sh watch.sh
 	for f in $^; do $(INSTALL) $$f ~/bin/; done
 
 .PHONY:	help
