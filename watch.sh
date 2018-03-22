@@ -20,13 +20,16 @@ filter() {
 }
 
 adjust() { # to interval
-    local -i TTW=0
+    local -i STW=0
+    local -i MTW=$(( INTERVAL / 60 - 1 ))
 
-    while :; do
-        TTW=$(( (`date '+1%S'` - 100) % INTERVAL ))
-        echo -ne "${TTW}/${INTERVAL} ...\\r"
-        [ ${TTW} -eq 0 ] && break
-        sleep 0.5
+    while sleep 1; do
+        STW=$(( (`date '+1%S'` - 100) % INTERVAL ))
+        echo -ne "> ${MTW}m ${STW}s /${INTERVAL} ...\\r"
+        if [ ${STW} -eq 0 ]; then
+            [ ${MTW} -eq 0 ] && break
+            (( MTW > 0 )) && let MTW-=1
+        fi
     done
 }
 
@@ -35,7 +38,6 @@ command=${1:-fetch} ; shift
 while clear; do
     date '+%F %T %z'
     "$command" "$@" | filter
-    sleep 5
     adjust
 done
 
